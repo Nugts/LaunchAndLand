@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "286290107154",
+    "project_id": "com-nugst-launchland-1efc3",
+    "storage_bucket": "com-nugst-launchland-1efc3.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:286290107154:android:1625018b7d0507de75b1cb",
+        "android_client_info": {
+          "package_name": "com.nugst.launchland"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB__-6zVj4Xzb7Oe1tAet2QOvAbREaJ2qs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
