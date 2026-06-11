@@ -17,7 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.unit.dp
-import com.nugst.launchland.data.local.entity.ChatMessage
+// Removed broken import
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

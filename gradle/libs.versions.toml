@@ -16,6 +16,7 @@ okhttp = "4.12.0"
 generativeai = "0.9.0"
 securityCrypto = "1.1.0-alpha06"
 ktor = "2.3.12"
+ksp = "2.2.10-1.0.31"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -49,3 +50,4 @@ ktor-client-logging = { group = "io.ktor", name = "ktor-client-logging", version
 android-application = { id = "com.android.application", version.ref = "agp" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 google-gms-google-services = { id = "com.google.gms.google-services", version.ref = "googleGmsGoogleServices" }
+ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }

@@ -8,12 +8,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
-data class Recommendation(
-    val title: String,
-    val type: String, // "Certification", "Project", "Activity"
-    val description: String
-)
-
 @Composable
 fun RecommendationModule(recommendations: List<Recommendation>) {
     Column(

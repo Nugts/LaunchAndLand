@@ -9,7 +9,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import com.nugst.launchland.data.local.entity.UserProfile
+import com.nugst.launchland.ui.chat.UserProfile
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -52,7 +52,7 @@ fun SettingsScreen(
                 
                 Button(
                     onClick = {
-                        onProfileSave(UserProfile(name = name, email = email, education = education, skills = skills, experience = experience, extracurriculars = ""))
+                        onProfileSave(UserProfile(name = name, email = email, education = education, skills = skills, experience = experience))
                     },
                     modifier = Modifier.align(Alignment.End)
                 ) {

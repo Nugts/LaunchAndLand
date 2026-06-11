@@ -1,15 +1,10 @@
 package com.nugst.launchland
 
-import android.Manifest
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
@@ -20,36 +15,22 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.room.Room
-import com.nugst.launchland.data.local.LaunchlandDatabase
-import com.nugst.launchland.data.repository.AiRepositoryImpl
 import com.nugst.launchland.data.repository.JobRepositoryImpl
 import com.nugst.launchland.ui.chat.ChatScreen
 import com.nugst.launchland.ui.chat.ChatViewModel
 import com.nugst.launchland.ui.chat.ChatViewModelFactory
+import com.nugst.launchland.ui.chat.UserProfile
 import com.nugst.launchland.ui.input.JobInputScreen
 import com.nugst.launchland.ui.onboarding.OnboardingScreen
 import com.nugst.launchland.ui.settings.SettingsScreen
 import com.nugst.launchland.ui.theme.LaunchLandTheme
-import com.nugst.launchland.util.SecurityManager
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        
-        val securityManager = SecurityManager(this)
-        val aiRepository = AiRepositoryImpl(securityManager)
-        val db = Room.databaseBuilder(
-            applicationContext,
-            LaunchlandDatabase::class.java, "launchland-db"
-        ).fallbackToDestructiveMigration().build()
-        val chatDao = db.chatDao()
-        val userDao = db.userDao()
         
         setContent {
             var isDarkMode by remember { mutableStateOf(false) }
@@ -59,17 +40,11 @@ class MainActivity : ComponentActivity() {
             }
 
             LaunchLandTheme(darkTheme = isDarkMode) {
-                PermissionRequestWrapper {
-                    MainApp(
-                        securityManager = securityManager,
-                        aiRepository = aiRepository,
-                        chatDao = chatDao,
-                        userDao = userDao,
-                        isDarkMode = isDarkMode,
-                        onThemeToggle = { isDarkMode = it },
-                        onFeedback = { sendFeedbackEmail() }
-                    )
-                }
+                MainApp(
+                    isDarkMode = isDarkMode,
+                    onThemeToggle = { isDarkMode = it },
+                    onFeedback = { sendFeedbackEmail() }
+                )
             }
         }
     }
@@ -83,68 +58,33 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@Composable
-fun PermissionRequestWrapper(content: @Composable () -> Unit) {
-    val context = LocalContext.current
-    var hasStoragePermission by remember {
-        mutableStateOf(
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) true
-            else ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
-        )
-    }
-
-    val launcher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission()
-    ) { isGranted ->
-        hasStoragePermission = isGranted
-    }
-
-    LaunchedEffect(Unit) {
-        if (!hasStoragePermission && Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
-            launcher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
-        }
-    }
-
-    content()
-}
-
 enum class Screen {
     Onboarding, Input, Chat, Settings
 }
 
 @Composable
 fun MainApp(
-    securityManager: SecurityManager,
-    aiRepository: AiRepositoryImpl,
-    chatDao: com.nugst.launchland.data.local.dao.ChatDao,
-    userDao: com.nugst.launchland.data.local.dao.UserDao,
     isDarkMode: Boolean,
     onThemeToggle: (Boolean) -> Unit,
     onFeedback: () -> Unit
 ) {
+    // Simplified Repository without dependencies for now
     val jobRepository = remember { JobRepositoryImpl() }
-    val chatViewModel: ChatViewModel = viewModel(factory = ChatViewModelFactory(jobRepository, aiRepository, chatDao, userDao))
+    val chatViewModel: ChatViewModel = viewModel(factory = ChatViewModelFactory(jobRepository))
     
     val currentThreadId by chatViewModel.currentThreadId.collectAsState()
     val messages by chatViewModel.messages.collectAsState()
     val userProfile by chatViewModel.userProfile.collectAsState()
+    val apiKey by chatViewModel.apiKey.collectAsState()
     
     var currentScreen by remember { 
-        mutableStateOf(
-            if (securityManager.getApiKey().isNullOrBlank()) Screen.Onboarding 
-            else if (currentThreadId == null && messages.isEmpty()) Screen.Input 
-            else Screen.Chat
-        ) 
+        mutableStateOf(if (apiKey.isBlank()) Screen.Onboarding else Screen.Input)
     }
     
-    // Sync currentScreen with currentThreadId and messages
-    LaunchedEffect(currentThreadId, messages) {
-        if (currentScreen == Screen.Onboarding) return@LaunchedEffect
-        
-        if (currentThreadId != null) {
+    // Sync navigation
+    LaunchedEffect(currentThreadId) {
+        if (currentThreadId != null && currentScreen == Screen.Input) {
             currentScreen = Screen.Chat
-        } else if (messages.isEmpty() && currentScreen != Screen.Settings) {
-            currentScreen = Screen.Input
         }
     }
 
@@ -154,7 +94,6 @@ fun MainApp(
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
 
-    // Global Error Popup
     if (errorPopup != null) {
         AlertDialog(
             onDismissRequest = { chatViewModel.dismissError() },
@@ -236,7 +175,7 @@ fun MainApp(
                 when (currentScreen) {
                     Screen.Onboarding -> OnboardingScreen(
                         onComplete = { key ->
-                            securityManager.saveApiKey(key)
+                            chatViewModel.saveApiKey(key)
                             currentScreen = Screen.Input
                         }
                     )
@@ -253,8 +192,8 @@ fun MainApp(
                         onMenuClick = { scope.launch { drawerState.open() } }
                     )
                     Screen.Settings -> SettingsScreen(
-                        apiKey = securityManager.getApiKey() ?: "",
-                        onApiKeyChange = { securityManager.saveApiKey(it) },
+                        apiKey = apiKey,
+                        onApiKeyChange = { chatViewModel.saveApiKey(it) },
                         userProfile = userProfile,
                         onProfileSave = { chatViewModel.saveProfile(it) },
                         isDarkMode = isDarkMode,

@@ -2,41 +2,29 @@ package com.nugst.launchland.ui.chat
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.nugst.launchland.data.local.dao.ChatDao
-import com.nugst.launchland.data.local.dao.UserDao
-import com.nugst.launchland.data.local.entity.ChatMessage
-import com.nugst.launchland.data.local.entity.ChatThread
-import com.nugst.launchland.data.local.entity.UserProfile
-import com.nugst.launchland.data.repository.AiRepositoryImpl
 import com.nugst.launchland.domain.repository.JobRepository
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.util.UUID
 
 class ChatViewModel(
-    private val jobRepository: JobRepository,
-    private val aiRepository: AiRepositoryImpl,
-    private val chatDao: ChatDao,
-    private val userDao: UserDao
+    private val jobRepository: JobRepository
 ) : ViewModel() {
 
     private val _currentThreadId = MutableStateFlow<String?>(null)
     val currentThreadId: StateFlow<String?> = _currentThreadId
 
-    @OptIn(ExperimentalCoroutinesApi::class)
-    val messages: StateFlow<List<ChatMessage>> = _currentThreadId
-        .flatMapLatest { threadId ->
-            if (threadId != null) {
-                chatDao.getMessagesForThread(threadId)
-            } else {
-                flowOf(emptyList())
-            }
-        }
-        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+    private val _allMessages = MutableStateFlow<Map<String, List<ChatMessage>>>(emptyMap())
+    
+    val messages: StateFlow<List<ChatMessage>> = combine(_currentThreadId, _allMessages) { threadId, allMsgs ->
+        if (threadId != null) allMsgs[threadId] ?: emptyList() else emptyList()
+    }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
-    val userProfile: StateFlow<UserProfile?> = userDao.getUserProfile()
-        .stateIn(viewModelScope, SharingStarted.Lazily, null)
+    private val _userProfile = MutableStateFlow<UserProfile?>(null)
+    val userProfile: StateFlow<UserProfile?> = _userProfile
+
+    private val _apiKey = MutableStateFlow("")
+    val apiKey: StateFlow<String> = _apiKey
 
     private val _recommendations = MutableStateFlow<List<Recommendation>>(emptyList())
     val recommendations: StateFlow<List<Recommendation>> = _recommendations
@@ -44,122 +32,58 @@ class ChatViewModel(
     private val _errorPopup = MutableStateFlow<String?>(null)
     val errorPopup: StateFlow<String?> = _errorPopup
 
-    private val _isAnalyzing = MutableStateFlow(false)
-    val isAnalyzing: StateFlow<Boolean> = _isAnalyzing
-
     fun startNewChat(content: String) {
-        viewModelScope.launch {
-            val threadId = UUID.randomUUID().toString()
-            val thread = ChatThread(id = threadId, title = content.take(30))
-            chatDao.insertThread(thread)
-            _currentThreadId.value = threadId
-            
-            sendMessageInternal(content)
-        }
+        val threadId = UUID.randomUUID().toString()
+        _currentThreadId.value = threadId
+        
+        val userMessage = ChatMessage(threadId = threadId, content = content, role = "user")
+        updateMessages(threadId, userMessage)
+        
+        fakeAiResponse(threadId, content)
     }
 
     fun sendMessage(content: String) {
-        viewModelScope.launch {
-            sendMessageInternal(content)
-        }
-    }
-
-    private suspend fun sendMessageInternal(content: String) {
         val threadId = _currentThreadId.value ?: return
-        val userMessage = ChatMessage(
-            threadId = threadId,
-            content = content,
-            role = "user"
-        )
-        chatDao.insertMessage(userMessage)
+        
+        val userMessage = ChatMessage(threadId = threadId, content = content, role = "user")
+        updateMessages(threadId, userMessage)
 
-        if (content.startsWith("http")) {
-            extractAndAnalyze(content)
-        } else {
-            generateAiResponse(content)
-        }
+        fakeAiResponse(threadId, content)
     }
 
-    private fun extractAndAnalyze(url: String) {
+    private fun fakeAiResponse(threadId: String, input: String) {
         viewModelScope.launch {
-            _isAnalyzing.value = true
-            val result = jobRepository.extractJobDescription(url)
-            result.onSuccess { description ->
-                generateAiResponse("Analyze this job description and suggest 3 specific activities/certifications to fill gaps in my profile. Job: $description")
-            }.onFailure { error ->
-                addAssistantMessage("Extraction failed: ${error.message}. Please paste the description manually.")
-            }
-            _isAnalyzing.value = false
-        }
-    }
-
-    private fun generateAiResponse(prompt: String) {
-        viewModelScope.launch {
-            _isAnalyzing.value = true
-            val profile = userProfile.value
-            val studentContext = if (profile != null) {
-                "User Profile: Name: ${profile.name}, Education: ${profile.education}, Skills: ${profile.skills}, Experience: ${profile.experience}. "
+            val response = if (input.startsWith("http")) {
+                "I've analyzed the job link! It looks like a great opportunity. I noticed some requirements like teamwork and technical skills. Want me to draft a resume? (Fake AI Analysis)"
             } else {
-                "Context: The user is a student with no prior professional job experience. "
+                "I recognize your input: \"$input\". As your career assistant, I recommend focusing on tailoring your resume for these specific points. (Fake AI Echo)"
             }
             
-            val instructions = "Format your response naturally, but if you have specific recommendations, include them at the end starting with '[REC]' on a new line for each."
-            val fullPrompt = studentContext + instructions + "\n\nUser Query: " + prompt
-            
-            val result = aiRepository.generateResponse(fullPrompt)
-            result.onSuccess { response ->
-                parseAndShowResponse(response)
-            }.onFailure { error ->
-                if (error.message == "MISSING_API_KEY") {
-                    _errorPopup.value = "Missing API Key. Please go to Settings to add your Gemini API Key."
-                } else {
-                    addAssistantMessage("AI Error: ${error.message}")
-                }
-            }
-            _isAnalyzing.value = false
+            val assistantMessage = ChatMessage(threadId = threadId, content = response, role = "assistant")
+            updateMessages(threadId, assistantMessage)
+
+            // Mock recommendations
+            _recommendations.value = listOf(
+                Recommendation("React Basics", "Skill", "The job asks for frontend experience."),
+                Recommendation("Agile Workshop", "Activity", "To fill the project management gap.")
+            )
         }
     }
 
-    private suspend fun parseAndShowResponse(response: String) {
-        val lines = response.split("\n")
-        val chatContent = lines.filter { !it.trim().startsWith("[REC]") }.joinToString("\n").trim()
-        val recLines = lines.filter { it.trim().startsWith("[REC]") }
-        
-        val newRecs = recLines.mapNotNull { line ->
-            val content = line.replace("[REC]", "").trim()
-            val parts = content.split(":", limit = 2)
-            if (parts.size == 2) {
-                Recommendation(parts[0].trim(), "Suggested", parts[1].trim())
-            } else {
-                Recommendation(content, "Suggested", "Based on job analysis")
-            }
-        }
-
-        if (newRecs.isNotEmpty()) {
-            _recommendations.value = newRecs
-        }
-        
-        addAssistantMessage(chatContent.ifBlank { response })
+    private fun updateMessages(threadId: String, newMessage: ChatMessage) {
+        val currentMap = _allMessages.value.toMutableMap()
+        val threadMsgs = currentMap[threadId]?.toMutableList() ?: mutableListOf()
+        threadMsgs.add(newMessage)
+        currentMap[threadId] = threadMsgs
+        _allMessages.value = currentMap
     }
 
-    private suspend fun addAssistantMessage(content: String) {
-        val threadId = _currentThreadId.value ?: return
-        val assistantMessage = ChatMessage(
-            threadId = threadId,
-            content = content,
-            role = "assistant"
-        )
-        chatDao.insertMessage(assistantMessage)
+    fun saveApiKey(key: String) {
+        _apiKey.value = key
     }
 
     fun saveProfile(profile: UserProfile) {
-        viewModelScope.launch {
-            userDao.saveUserProfile(profile)
-        }
-    }
-
-    fun loadThread(threadId: String) {
-        _currentThreadId.value = threadId
+        _userProfile.value = profile
     }
 
     fun clearCurrentThread() {
